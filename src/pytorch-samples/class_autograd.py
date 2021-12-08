@@ -3,6 +3,8 @@
 
 import torch
 import math
+import numpy as np
+import time
 
 
 class LegendrePolynomial3(torch.autograd.Function):
@@ -57,9 +59,11 @@ def main():
     d = torch.full((), 0.3, device=device, dtype=dtype, requires_grad=True)
 
     learning_rate = 5e-6
+    times = 2000*[0]
     for t in range(2000):
         # To apply our Function, we use Function.apply method.
         # We alias this as 'P3'.
+        past = time.time()
         P3 = LegendrePolynomial3.apply
 
         # Forward pass: compute predicted y using operations; we compute
@@ -86,9 +90,11 @@ def main():
             b.grad = None
             c.grad = None
             d.grad = None
+        times[t] = time.time()-past
 
     print(f'Result: y = {a.item()} + {b.item()} * P3({c.item()} +'
           f' {d.item()} x)')
+    print(f'Elapsed time: {np.average(times)}')
 
 
 if __name__ == '__main__':
