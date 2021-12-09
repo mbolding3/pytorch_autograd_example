@@ -6,6 +6,7 @@ from torch.autograd import Function
 import numpy as np
 from torch.nn.modules.module import Module
 from torch.nn.parameter import Parameter
+from torch.nn.init import uniform_
 from torch.autograd.gradcheck import gradcheck
 from scipy.signal import correlate
 
@@ -53,15 +54,6 @@ class CorrNaive(Function):
         return (torch.from_numpy(grad_input), torch.from_numpy(grad_filter))
 
 
-class TestModule(Module):
-    def __init__(self, filter_length):
-        super(TestModule, self).__init__()
-        self.filter = Parameter(torch.randn(filter_length))
-
-    def forward(self, input):
-        return CorrNaive.apply(input, self.filter)
-
-
 class NetModule(Module):
     '''
     This is all we have to do to add learnable parameters - 
@@ -72,8 +64,8 @@ class NetModule(Module):
     def __init__(self, filter_features):
         super(NetModule, self).__init__()
         self.filter_features = filter_features
-        self.features = nn.Parameter(torch.empty(filter_features))
-        nn.init.uniform_(self.features, -1, 1)
+        self.features = Parameter(torch.empty(filter_features))
+        uniform_(self.features, -1, 1)
 
     def forward(self, input):
         return CorrNaive.apply(input, self.features)
@@ -104,7 +96,7 @@ def gradcheck_main():
     input_length = 10
     input = torch.randn(input_length, dtype=torch.double,
                         requires_grad = True)
-    module = TestModule(filter_length)
+    module = NetModule(filter_length)
     test = gradcheck(module, input, eps=1e-6, atol=1e-4)
     print(f'Are the gradients correct: {test}')
 
