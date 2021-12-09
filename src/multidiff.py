@@ -16,6 +16,7 @@ class MultipleArgs(Function):
     How do we handle functions with more than one differentiable
     argument? This class seeks to answer that question.
 
+    f : R^2 x R^4 -> R^2
     f(u, v) = [u_0 v_0 + u_1 v_1,
                u_0 v_2 + u_1 v_3].
     '''
