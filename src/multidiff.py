@@ -15,6 +15,9 @@ class MultipleArgs(Function):
     v: a 4-vector
     How do we handle functions with more than one differentiable
     argument? This class seeks to answer that question.
+
+    f(u, v) = [u_0 v_0 + u_1 v_1,
+               u_0 v_2 + u_1 v_3].
     '''
     @staticmethod
     def forward(ctx, u, v):
@@ -44,6 +47,9 @@ class MultipleArgs(Function):
         The question is how to interpret the gradients argument when
         one or both of the input tensors are marked as requiring
         grad.
+
+        Remember that the output is supposed to be ( (D_u f)^T * gradients,
+                                                     (D_v f)^T * gradients ).
         '''
         u, v = ctx.saved_tensors
         dtype = u.dtype
