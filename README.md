@@ -1,2 +1,3 @@
 # pytorch_autograd_example
-Examples implementing custom autograd routines
+
+Repo for learning Pytorch integration.

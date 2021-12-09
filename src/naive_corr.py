@@ -7,9 +7,10 @@ import numpy as np
 from torch.nn.modules.module import Module
 from torch.nn.parameter import Parameter
 from torch.autograd.gradcheck import gradcheck
+from scipy.signal import correlate
 
 
-class ConvNaive(Function):
+class CorrNaive(Function):
     '''
     Function class not intended to contain learnable parameters.
     All we need to defined in this example is the differential
@@ -37,27 +38,27 @@ class ConvNaive(Function):
     @staticmethod
     def backward(ctx, grad_output):
         input, filter = ctx.saved_tensors
-        filter_r = filter.numpy()[::-1]
+        filter_np = filter.numpy()
         grad_np = grad_output.detach().numpy()
         n = len(input)
         k = len(filter)
-        grad_input = np.zeros((n-k+1, n))
+        diff = np.zeros((n-k+1, n))
         for i in range(n-k+1):
-            grad_input[i,n-k-i:n-i] = filter_r
-        grad_input = (grad_input.transpose()@(grad_np)).transpose()
+            diff[i,i:i+k] = filter_np
+        grad_input = diff.transpose()@grad_np
         return (torch.from_numpy(grad_input), None)
 
 
-class ConvModule(Module):
+class CorrModule(Module):
     def __init__(self, filter_length):
-        super(ConvModule, self).__init__()
+        super(CorrModule, self).__init__()
         self.filter = Parameter(torch.randn(filter_length))
 
     def forward(self, input):
-        return ConvNaive.apply(input, self.filter)
+        return CorrNaive.apply(input, self.filter)
 
 
-def main():
+def sanity_main():
     '''
     In order for a tensor to be elligible for backward, you must set
     requires_grad = True apparently.
@@ -67,7 +68,7 @@ def main():
     filter = torch.randn(filter_length)
     input = torch.randn(input_length, requires_grad = True)
     grad = torch.randn(input_length-filter_length+1)
-    f = ConvNaive()
+    f = CorrNaive()
     result = f.apply(input, filter)
     print(f'Convolution output: {result}')
     result.backward(grad)
@@ -79,10 +80,23 @@ def gradcheck_main():
     input_length = 10
     input = torch.randn(input_length, dtype=torch.double,
                         requires_grad = True)
-    module = ConvModule(filter_length)
+    module = CorrModule(filter_length)
     test = gradcheck(module, input, eps=1e-6, atol=1e-4)
     print(f'Are the gradients correct: {test}')
 
 
+def scipy_main():
+    filter_length = 3
+    input_length = 10
+    filter = torch.randn(filter_length)
+    input = torch.randn(input_length)
+    f = CorrNaive()
+    result = f.apply(input, filter)
+    scipy_result = correlate(input.numpy(), filter.numpy(), mode='valid')
+    test = np.allclose(result, scipy_result)
+    print(f'Does the function equal scipy.signal.correlate: {test}')
+
+
 if __name__ == '__main__':
     gradcheck_main()
+    scipy_main()
