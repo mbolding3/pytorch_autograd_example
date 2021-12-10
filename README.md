@@ -10,6 +10,8 @@ cd pytorch_autograd_example
 conda create --name pytorch --file conda.txt
 ```
 
+In order to use the Cusignal examples you will alternatively need `conda create --name pytorch+cusignal --file cusignal.txt`.
+
 
 ## Usage
 
