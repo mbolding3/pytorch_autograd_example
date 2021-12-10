@@ -54,7 +54,7 @@ class CorrNaive(Function):
         return (torch.from_numpy(grad_input), torch.from_numpy(grad_filter))
 
 
-class NetModule(Module):
+class CorrModule(Module):
     '''
     This is all we have to do to add learnable parameters - 
     use the nn.Parameter function to declare them. There's probably
@@ -62,7 +62,7 @@ class NetModule(Module):
     do it uniformly randomly.
     '''
     def __init__(self, filter_features):
-        super(NetModule, self).__init__()
+        super(CorrModule, self).__init__()
         self.filter_features = filter_features
         self.features = Parameter(torch.empty(filter_features))
         uniform_(self.features, -1, 1)
@@ -96,7 +96,7 @@ def gradcheck_main():
     input_length = 10
     input = torch.randn(input_length, dtype=torch.double,
                         requires_grad = True)
-    module = NetModule(filter_length)
+    module = CorrModule(filter_length)
     test = gradcheck(module, input, eps=1e-6, atol=1e-4)
     print(f'Are the gradients correct: {test}')
 
@@ -113,6 +113,39 @@ def scipy_main():
     print(f'Does the function equal scipy.signal.correlate: {test}')
 
 
+def backprop_main():
+    '''
+    Example of backprop. Just to prove that we can train
+    our convolution layer using normal Pytorch ops. This code is
+    copied from the polynomial fit example. It doesn't really make
+    sense to use a correlation layer for this but who cares.
+    '''
+    N = 2000
+    k = 10
+    iters = 2000
+    x = torch.linspace(-np.sqrt(10), np.sqrt(10), 2000)
+    y = torch.sin(x)
+    model = torch.nn.Sequential(
+        CorrModule(10),
+        torch.nn.Linear(1991,2000)
+    )
+    loss_fn = torch.nn.MSELoss(reduction='sum')
+    learning_rate = 1e-6
+    for t in range(iters):
+        y_pred = model(x)
+        loss = loss_fn(y_pred, y)
+        if t % 100 == 99:
+            print(t, loss.item())
+        model.zero_grad()
+        loss.backward()
+        with torch.no_grad():
+            for param in model.parameters():
+                param -= learning_rate * param.grad
+    corr_layer = model[0]
+    print(f'Learned filter: {corr_layer.features.detach().numpy()}')
+
+
 if __name__ == '__main__':
-    gradcheck_main()
-    scipy_main()
+    #gradcheck_main()
+    #scipy_main()
+    backprop_main()
