@@ -19,9 +19,14 @@ class CorrNaive(Function):
     Function class not intended to contain learnable parameters.
     All we need to defined in this example is the differential
     with respect to the inputs.
-    Something is wrong...so torch.as_tensor(<some-cupy-array>)
-    is not working. Hence the un-necessary cast using .asnumpy
-    for now.
+    Something is wrong with my cupy / cusignal install.
+
+    >>> a = cupy.arange(10)
+    >>> b = torch.as_tensor(a)
+    ValueError: given array strides not a multiple of the element byte size.
+    Make a copy of the array to reallocate the memory.
+
+    Hence the un-necessary cast using .asnumpy for now.
     '''
     @staticmethod
     def forward(ctx, input, filter):
