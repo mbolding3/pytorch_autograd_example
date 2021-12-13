@@ -19,28 +19,28 @@ class CorrNaive(Function):
     Function class not intended to contain learnable parameters.
     All we need to defined in this example is the differential
     with respect to the inputs.
+    Something is wrong...so torch.as_tensor(<some-cupy-array>)
+    is not working. Hence the un-necessary cast using .asnumpy
+    for now.
     '''
     @staticmethod
     def forward(ctx, input, filter):
-        # detach so we can cast to NumPy
         input = input.detach()
         filter = filter.detach()
         input_cp, filter_cp = cp.asarray(input), cp.asarray(filter)
         ctx.save_for_backward(input, filter)
         out = cucorrelate(input_cp, filter_cp, mode='valid')
-        #return torch.as_tensor(out, device='cuda')
-        return torch.as_tensor(out.copy(), device='cuda')
+        return torch.as_tensor(cp.asnumpy(out), device='cuda')
 
     @staticmethod
     def backward(ctx, grad_output):
         input, filter = ctx.saved_tensors
-        filter_np = filter.numpy()
-        input_np = input.numpy()
-        grad_np = grad_output.detach().numpy()
-        grad_input = cuconvolve(grad_np, filter_np, mode='full')
-        grad_filter = cucorrelate(input, grad_np, mode='valid')
-        grad_input = torch.as_tensor(grad_input, device='cuda')
-        grad_filter = torch.as_tensor(grad_filter, device='cuda')
+        input_cp, filter_cp = cp.asarray(input), cp.asarray(filter)
+        grad_cp = cp.asarray(grad_output.detach())
+        grad_input = cuconvolve(grad_cp, filter_cp, mode='full')
+        grad_filter = cucorrelate(input_cp, grad_cp, mode='valid')
+        grad_input = torch.as_tensor(cp.asnumpy(grad_input), device='cuda')
+        grad_filter = torch.as_tensor(cp.asnumpy(grad_filter), device='cuda')
         return (grad_input, grad_filter)
 
 
@@ -54,14 +54,14 @@ class CorrModule(Module):
     def __init__(self, filter_features):
         super(CorrModule, self).__init__()
         self.filter_features = filter_features
-        self.features = Parameter(torch.empty(filter_features))
+        self.features = Parameter(torch.empty(filter_features, device='cuda'))
         uniform_(self.features, -1, 1)
 
     def forward(self, input):
         return CorrNaive.apply(input, self.features)
 
     def extra_repr(self):
-        return f'Filter: {self.features}'
+        return f'Filter: {cp.asnumpy(self.features.detach())}'
 
 
 def sanity_main():
@@ -97,8 +97,9 @@ def scipy_main():
     input = torch.randn(input_length, device='cuda')
     f = CorrNaive()
     result = f.apply(input, filter)
-    scipy_result = correlate(input.numpy(), filter.numpy(), mode='valid')
-    test = np.allclose(result, scipy_result)
+    scipy_result = correlate(input.cpu().numpy(),
+                             filter.cpu().numpy(), mode='valid')
+    test = np.allclose(result.cpu().numpy(), scipy_result)
     print(f'Does the function equal scipy.signal.correlate: {test}')
 
 
@@ -111,12 +112,13 @@ def backprop_main():
     '''
     N = 2000
     k = 10
-    iters = 2000
+    iters = 500
+    device = torch.device('cuda:0')
     x = torch.linspace(-np.sqrt(10), np.sqrt(10), 2000, device='cuda')
     y = torch.sin(x)
     model = torch.nn.Sequential(
         CorrModule(10),
-        torch.nn.Linear(1991,2000)
+        torch.nn.Linear(in_features=N-k+1, out_features=N).to(device)
     )
     loss_fn = torch.nn.MSELoss(reduction='sum')
     learning_rate = 1e-6
@@ -131,11 +133,11 @@ def backprop_main():
             for param in model.parameters():
                 param -= learning_rate * param.grad
     corr_layer = model[0]
-    print(f'Learned filter: {corr_layer.features.detach().numpy()}')
+    print(corr_layer)
 
 
 if __name__ == '__main__':
-    sanity_main()
+    #sanity_main()
     #gradcheck_main()
     #scipy_main()
-    #backprop_main()
+    backprop_main()
