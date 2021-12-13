@@ -146,6 +146,6 @@ def backprop_main():
 
 
 if __name__ == '__main__':
-    #gradcheck_main()
-    #scipy_main()
+    scipy_main()
+    gradcheck_main()
     backprop_main()
