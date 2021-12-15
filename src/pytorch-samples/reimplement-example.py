@@ -5,7 +5,6 @@ import torch
 import sys
 import math
 import time
-sys.path.insert(0, '../pytorch-samples')
 from class_autograd import LegendrePolynomial3
 import numpy as np
 
