@@ -16,6 +16,11 @@ class CorrNaive(Function):
     Function class not intended to contain learnable parameters.
     All we need to defined in this example is the differential
     with respect to the inputs.
+
+    The implementation here is the same as that given in the
+    Overleaf document. This is not at all computationally
+    efficient but it is relatively easy to check that it
+    matches the Overleaf formuals exactly.
     '''
     @staticmethod
     def forward(ctx, input, filter):
