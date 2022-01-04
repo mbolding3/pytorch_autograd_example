@@ -17,7 +17,7 @@ import cupy as cp
 class CorrNaive(Function):
     '''
     Function class not intended to contain learnable parameters.
-    All we need to defined in this example is the differential
+    All we need to defined in this example is the Jacobian 
     with respect to the inputs.
     Something is wrong with my cupy / cusignal install.
 
