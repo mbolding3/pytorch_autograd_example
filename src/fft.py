@@ -16,6 +16,11 @@ def cp_to_torch(cp_output):
 
 
 class FuncCusignalFFT(Function):
+    '''
+    Copying the implementation found here:
+    https://github.com/locuslab/pytorch_fft/blob/b3ac2c6fba5acde03c242f50865c\
+    964e3935e1aa/pytorch_fft/fft/autograd.py#L88
+    '''
 
     @staticmethod
     def forward(ctx, input):
@@ -52,7 +57,7 @@ class CusignalFFT(Module):
 
 
 def gradcheck_main():
-    x = torch.randn(10, dtype=torch.double,
+    x = torch.randn(10, dtype = torch.double,
                     requires_grad = True, device = 'cuda')
     module = CusignalFFT()
     '''
@@ -63,5 +68,18 @@ def gradcheck_main():
     print(f'Are the gradients correct: {test}')
 
 
+def forward_comparison_main():
+    x = torch.randn(10, dtype = torch.double, device = 'cuda')
+    module = CusignalFFT()
+    this_r, this_i = module.forward(x)
+    this_r = cp.array(this_r.reshape(6,1))
+    this_i = cp.array(this_i.reshape(6,1))
+    this_fft = cp.concatenate([this_r, this_i], axis=1)
+    that_fft = torch.rfft(x, 1)
+    test = np.allclose(this_fft, that_fft.cpu().numpy())
+    print(f'Does this forward implementation agree with torch? {test}')
+
+
 if __name__ == '__main__':
     gradcheck_main()
+    forward_comparison_main()
