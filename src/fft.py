@@ -20,6 +20,8 @@ class FuncCusignalFFT(Function):
     Copying the implementation found here:
     https://github.com/locuslab/pytorch_fft/blob/b3ac2c6fba5acde03c242f50865c\
     964e3935e1aa/pytorch_fft/fft/autograd.py#L88
+
+    1d only.
     '''
 
     @staticmethod

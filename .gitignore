@@ -6,6 +6,9 @@ __pycache__/
 # Local python environment
 pyenv/
 
+# local env
+setenv.sh
+
 # C extensions
 *.so
 
