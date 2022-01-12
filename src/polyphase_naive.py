@@ -2,6 +2,7 @@
 
 
 import torch
+from torch import flip
 from torch.autograd import Function
 import numpy as np
 from torch.nn.modules.module import Module
@@ -16,6 +17,12 @@ from scipy.signal import resample_poly
 
 def cp_to_torch(cp_output):
     return torch.as_tensor(cp.asnumpy(cp_output), device='cuda')
+
+
+def get_start_index(length):
+    if length <= 2:
+        return 0
+    return (length - 1) // 2
 
 
 class FuncToyResample(Function):
@@ -37,41 +44,76 @@ class FuncToyResample(Function):
         return(down.transpose())
 
     @staticmethod
-    def forward(ctx, input, filter_coeffs, up, down):
-        # input and filter_coeffs are tensors, up and down are ints
-        input         = input.detach()
+    def forward(ctx, x, filter_coeffs, up, down):
+        x             = x.detach()
         filter_coeffs = filter_coeffs.detach()
-        ctx.save_for_backward(input, filter_coeffs)
-        input         = input.numpy()
-        filter_coeffs = filter_coeffs.numpy()
+        ctx.save_for_backward(x, filter_coeffs)
 
-        up_mat = get_up_mat(input.shape[0], up)
-        down_mat = get_down_mat(input.shape[0], down)
+        x_size = x.shape[0]
+        filt_size = filter_coeffs.shape[0]
+        ud_gcd = gcd(up, down)
+        up = up // ud_gcd
+        down = down // ud_gcd
 
-        up = up_mat.dot(input)
-        filtered = np.convolve(up, filter_coeffs, mode='valid')
-        out = down_mat.dot(filtered)
-        return torch.as_tensor(out, dtype=input.dtype)
+        x_up = torch.zeros(up * x_size, device = x.device.type)
+        # This is probably terrible for device data.
+        x_up[::up] = up * x
+        start = get_start_index(filt_size)
+        if (up == 1 and down == 1):
+            x_out = x_up
+        elif (up == 1 and down > 1):
+            # just down-sample
+            x_out = torch.conv1d(x_up.reshape(1, 1, x_up.shape[0]),
+                                 flip(filter_coeffs, [0]).\
+                                 reshape(1, 1, filt_size),
+                                 padding = filt_size - 1)
+            np_conv = np.convolve(x_up.numpy(), filter_coeffs.numpy())
+            x_out = x_out.reshape(x_out.shape[-1])[start::down]
+        elif (up > 1 and down == 1):
+            # just up-sample
+            x_out = torch.conv1d(x_up.reshape(1, 1, x_up.shape[0]),
+                                 flip(filter_coeffs, [0]).\
+                                 reshape(1, 1, filt_size),
+                                 padding = filt_size - 1)
+            np_conv = np.convolve(x_up.numpy(), filter_coeffs.numpy())
+            x_out = x_out.reshape(x_out.shape[-1])[start:]
+        else:
+            # non-trivial up and down
+            x_out = torch.conv1d(x_up.reshape(1, 1, x_up.shape[0]),
+                                 flip(filter_coeffs, [0]).\
+                                 reshape(1, 1, filt_size),
+                                 padding = filt_size - 1)
+            np_conv = np.convolve(x_up.numpy(), filter_coeffs.numpy())
+            x_out = x_out.reshape(x_out.shape[-1])[start::down]
+        out_len = x_size * up
+        out_len = out_len // down + bool(out_len % down)
+        x_out = x_out[:out_len]
+        return(x_out)
 
 
 class Resample(Module):
     def __init__(self):
-        super(CusignalFFT, self).__init__()
+        super(Resample, self).__init__()
 
-    def forward(self, input):
-        return FuncCusignalFFT.apply(input)
-
-
-def sanity_main():
-    x = np.random.rand(10)
-    print(x)
-    print(resample_poly(x, 1, 1))
+    def forward(self, x, up, down, filter_coeffs):
+        return FuncToyResample.apply(x, filter_coeffs, up, down)
 
 
-def get_start_index(length):
-    if length <= 2:
-        return 0
-    return (length - 1) // 2
+def scipy_check_main(repetitions = 1):
+    module = Resample()
+    for i in range(repetitions):
+        x_size = np.random.randint(30, 100)
+        filter_size = np.random.randint(5, 20)
+        x = torch.randn(x_size)
+        f = torch.randn(filter_size)
+        up = np.random.randint(1, 20)
+        down = np.random.randint(1, 20)
+        scipy_resample = resample_poly(x, up, down, window = f.numpy())
+        our_resample = module.forward(x, up, down, f)
+        if not np.allclose(scipy_resample, our_resample, atol=1e-4):
+            print(f"up: {up}, down: {down}")
+            print(f"scipy result: {scipy_resample[:10]}")
+            print(f"our result: {our_resample[:10]}")
 
 
 def downsample_compare(repetitions = 1):
@@ -170,4 +212,5 @@ def polyphase_compare(repetitions = 1):
 if __name__ == '__main__':
     #downsample_compare(1000)
     #upsample_compare(1000)
-    polyphase_compare(1000)
+    #polyphase_compare(1000)
+    scipy_check_main(1000)
