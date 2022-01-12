@@ -156,7 +156,9 @@ def polyphase_compare(repetitions = 1):
             x_np = np.convolve(x_np, filt)
             x_np = x_np[start::down]
         x_sp = resample_poly(x, up, down, window=filt)
-        x_np = x_np[:len(x_sp)]
+        out_len = x_size * up
+        out_len = out_len // down + bool(out_len % down)
+        x_np = x_np[:out_len]
         same = np.allclose(x_np, x_sp)
         if not same:
             print(f"Naive and poly implementations agree? {same}")
