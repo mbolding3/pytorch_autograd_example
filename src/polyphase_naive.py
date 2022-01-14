@@ -15,10 +15,6 @@ from scipy.sparse import lil_matrix
 from scipy.signal import resample_poly
 
 
-def cp_to_torch(cp_output):
-    return torch.as_tensor(cp.asnumpy(cp_output), device='cuda')
-
-
 def get_start_index(length):
     if length <= 2:
         return 0
@@ -37,7 +33,7 @@ class FuncToyResample(Function):
         filter_coeffs = filter_coeffs.detach()
         up            = up.detach()
         down          = down.detach()
-        x_og = torch.clone(x)
+        x_size_og = torch.Tensor([x.shape[0]])
         f_og = torch.clone(filter_coeffs)
         up_og = torch.clone(up)
         down_og = torch.clone(down)
@@ -55,11 +51,13 @@ class FuncToyResample(Function):
             x_out = x
             inverse_size = torch.Tensor([x.shape[0]])
             out_len = torch.Tensor([0])
+            x_up_og = None
         else:
             x_up = torch.zeros(up * x_size, device = x.device.type,
                                dtype = x.dtype)
             # This is probably terrible for device data.
             x_up[::up] = up * torch.clone(x)
+            x_up_og = torch.clone(x_up)
             start = get_start_index(filt_size)
             x_conv = torch.conv1d(x_up.reshape(1, 1, x_up.shape[0]),
                                   flip(filter_coeffs, [0]).\
@@ -71,8 +69,8 @@ class FuncToyResample(Function):
             out_len = out_len // down + bool(out_len % down)
             x_out = x_out[:out_len]
             out_len = torch.Tensor([out_len])
-        ctx.save_for_backward(x_og, f_og, up_og, down_og, inverse_size,
-                              out_len)
+        ctx.save_for_backward(x_size_og, f_og, up_og, down_og, inverse_size,
+                              out_len, x_up_og)
         return(x_out)
 
     @staticmethod
@@ -85,11 +83,18 @@ class FuncToyResample(Function):
         3) down sample beginning at start index
         4) truncate output to size n * up / down + optional 1 if there is
            a remainder.
-        '''
-        gradient                                          = gradient.detach()
-        x, filter_coeffs, up, down, inverse_size, out_len = ctx.saved_tensors
 
-        x_size = x.shape[0]
+        It's the reshaping and striding that causes all the problems.
+        Gradient_x of a padded convolution is a non-padded correlation - 
+        that's the easy part, strangely.
+        Gradient of a correlation with respect to the filter is again
+        a correlation with respect to the same filter.
+        '''
+        gradient = gradient.detach()
+        x_size, filter_coeffs, up, down, inverse_size, out_len, x_up \
+        = ctx.saved_tensors
+
+        x_size = int(x_size[0])
         gradient_size = gradient.shape[0]
         filt_size = filter_coeffs.shape[0]
         up = int(up[0])
@@ -99,13 +104,13 @@ class FuncToyResample(Function):
         down = down // ud_gcd
         start = get_start_index(filt_size)
         inverse_size = int(inverse_size)
-        out_len = int(out_len)
+        out_x_len = int(out_len)
         filter_coeffs = filter_coeffs.type(gradient.dtype)
 
-        if (up == 1 and down == 1):
-            out = gradient
-        else:
-            tmp = torch.zeros(out_len)
+        if (up != 1 or down != 1):
+            # This is up-sampling by a factor down, and a bunch of
+            # correcting the weird array truncations in forward.
+            tmp = torch.zeros(out_x_len)
             tmp[:gradient.shape[0]] = gradient
             gradient = tmp          
             gradient_up = torch.zeros(inverse_size,
@@ -115,11 +120,23 @@ class FuncToyResample(Function):
             tmp = torch.zeros((inverse_size - start) // down + extra)
             tmp[:gradient.shape[0]] = gradient
             gradient_up[start :: down] = torch.clone(tmp)
-            out = torch.conv1d(gradient_up.reshape(1, 1, inverse_size),
+
+        if (up == 1 and down == 1):
+            out_x = gradient
+        else:
+            out_x = torch.conv1d(gradient_up.reshape(1, 1, inverse_size),
                                filter_coeffs.reshape(1, 1, filt_size))
-            out = up * out.reshape(out.shape[-1])[::up]
-        out = out[:x_size]
-        return(out, None, None, None)
+            out_x = up * out_x.reshape(out_x.shape[-1])[::up]
+        out_x = out_x[:x_size]
+
+        if (up == 1 and down == 1):
+            out_f = np.zeros(filt_coeffs.shape[0])
+        else:
+            out_f = torch.conv1d(gradient_up.reshape(1, 1, inverse_size),
+                                 x_up.reshape(1, 1, x_up.shape[0]))
+        out_f = out_f.reshape(out_f.shape[-1])[:filter_coeffs.shape[0]]
+
+        return(out_x, out_f, None, None)
 
 
 class Resample(Module):
@@ -138,7 +155,7 @@ def gradcheck_main(repetitions = 1):
         up = torch.randint(1, 20, (1,), requires_grad = False)
         down = torch.randint(1, 20, (1,), requires_grad = False)
         filter_size = np.random.randint(10,30)
-        filter_coeffs = torch.randn(filter_size, requires_grad = False,
+        filter_coeffs = torch.randn(filter_size, requires_grad = True,
                                     dtype = torch.double,
                                     device = 'cpu')
         inputs = torch.randn(100, dtype = torch.double, requires_grad = True,
