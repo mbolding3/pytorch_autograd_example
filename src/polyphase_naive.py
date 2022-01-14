@@ -108,6 +108,7 @@ class FuncToyResample(Function):
         filter_coeffs = filter_coeffs.type(gradient.dtype)
 
         if (up != 1 or down != 1):
+            # J_x down
             # This is up-sampling by a factor down, and a bunch of
             # correcting the weird array truncations in forward.
             tmp = torch.zeros(out_x_len)
@@ -121,6 +122,7 @@ class FuncToyResample(Function):
             tmp[:gradient.shape[0]] = gradient
             gradient_up[start :: down] = torch.clone(tmp)
 
+        # J_x up \times J_x conv
         if (up == 1 and down == 1):
             out_x = gradient
         else:
@@ -129,6 +131,7 @@ class FuncToyResample(Function):
             out_x = up * out_x.reshape(out_x.shape[-1])[::up]
         out_x = out_x[:x_size]
 
+        # J_f conv
         if (up == 1 and down == 1):
             out_f = np.zeros(filt_coeffs.shape[0])
         else:
