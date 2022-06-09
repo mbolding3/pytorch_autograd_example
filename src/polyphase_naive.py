@@ -133,7 +133,9 @@ class FuncToyResample(Function):
 
         # J_f conv
         if (up == 1 and down == 1):
-            out_f = np.zeros(filt_coeffs.shape[0])
+            out_f = torch.zeros(filter_coeffs.shape[0],
+                                device = gradient.device.type,
+                                dtype = filter_coeffs.dtype)
         else:
             out_f = torch.conv1d(gradient_up.reshape(1, 1, inverse_size),
                                  x_up.reshape(1, 1, x_up.shape[0]))
@@ -153,137 +155,145 @@ class Resample(Module):
         return FuncToyResample.apply(x, self.filter_coeffs, self.up, self.down)
 
 
-def gradcheck_main(repetitions = 1):
-    for i in range(repetitions):
-        up = torch.randint(1, 20, (1,), requires_grad = False)
-        down = torch.randint(1, 20, (1,), requires_grad = False)
-        filter_size = np.random.randint(10,30)
-        filter_coeffs = torch.randn(filter_size, requires_grad = True,
-                                    dtype = torch.double,
-                                    device = 'cpu')
-        inputs = torch.randn(100, dtype = torch.double, requires_grad = True,
-                             device = 'cpu')
-        module = Resample(up, down, filter_coeffs)
-        test = gradcheck(module, inputs, eps=1e-6, atol=1e-4)
-        if not test:
-            print(f'Are the gradients correct? {test}')
-            print(f'Up: {up}, down: {down}')
-    print(f'Are the gradients correct? {test}')
+def accept_reps(f):
+    def wrapper(repetitions = 1):
+        for i in range(repetitions):
+            f()
+    return wrapper
 
 
-def scipy_check_main(repetitions = 1):
-    for i in range(repetitions):
-        x_size = np.random.randint(30, 100)
-        filter_size = np.random.randint(5, 20)
-        x = torch.randn(x_size)
-        f = torch.randn(filter_size)
-        up = torch.randint(1, 20, (1,))
-        down = torch.randint(1, 20, (1,))
-        module = Resample(up, down, f)
-        scipy_resample = resample_poly(x, up, down, window = f.numpy())
-        our_resample = module.forward(x)
-        if not np.allclose(scipy_resample, our_resample, atol=1e-4):
-            print(f"up: {up}, down: {down}")
-            print(f"scipy result: {scipy_resample[:10]}")
-            print(f"our result: {our_resample[:10]}")
+@accept_reps
+def gradcheck_main():
+    up = torch.randint(1, 20, (1,), requires_grad = False)
+    down = torch.randint(1, 20, (1,), requires_grad = False)
+    filter_size = np.random.randint(10,30)
+    filter_coeffs = torch.randn(filter_size, requires_grad = True,
+                                dtype = torch.double,
+                                device = 'cpu')
+    inputs = torch.randn(100, dtype = torch.double, requires_grad = True,
+                         device = 'cpu')
+    module = Resample(up, down, filter_coeffs)
+    test = gradcheck(module, inputs, eps=1e-6, atol=1e-4)
+    if not test:
+        print(f'Are the gradients correct? {test}')
+        print(f'Up: {up}, down: {down}')
 
 
-def downsample_compare(repetitions = 1):
-    for i in range(repetitions):
-        x = np.random.rand(100)
-        filt_len = np.random.randint(1,20)
-        down = np.random.randint(1,10)
-        filt = np.random.rand(filt_len)
-        x_sp = resample_poly(x, 1, down, window=filt)
-        x_np = np.convolve(x, filt)
-        start = get_start_index(filt_len)
-        if down == 1:
-            x_np = x
-        else:
-            x_np = x_np[start::down]
-        x_np = x_np[:len(x_sp)]
-        same = np.allclose(x_np, x_sp)
-        if not same:
-            print(f"Naive and poly implementations agree? {same}")
-            print(f"filter length: {filt_len}")
-            print(f"down: {down}")
-            print(f"x conv: {np.convolve(x, filt)[:15]}")
-            print(f"x_np: {x_np[:5]}")
-            print(f"x_sp: {x_sp[:5]}")
+@accept_reps
+def scipy_check_main():
+    x_size = np.random.randint(30, 100)
+    filter_size = np.random.randint(5, 20)
+    x = torch.randn(x_size)
+    f = torch.randn(filter_size)
+    up = torch.randint(1, 20, (1,))
+    down = torch.randint(1, 20, (1,))
+    module = Resample(up, down, f)
+    scipy_resample = resample_poly(x, up, down, window = f.numpy())
+    our_resample = module.forward(x)
+    if not np.allclose(scipy_resample, our_resample, atol=1e-4):
+        print(f"up: {up}, down: {down}")
+        print(f"scipy result: {scipy_resample[:10]}")
+        print(f"our result: {our_resample[:10]}")
+        return
 
 
-def upsample_compare(repetitions = 1):
-    for i in range(repetitions):
-        x_size = 100
-        filt_size = np.random.randint(1,30)
-        up = np.random.randint(1,10)
-        x = np.random.rand(x_size)
-        filt = np.random.rand(filt_size)
-        x_np = np.zeros(up * x_size)
-        x_np[::up] = up * x
-        if (up > 1):
-            start = get_start_index(filt_size)
-            x_np = np.convolve(x_np, filt)
-            x_np = x_np[start:]
-        x_sp = resample_poly(x, up, 1, window=filt)
-        if len(x_sp) > len(x_np):
-            x_np = np.concatenate([x_np,
-                                  np.zeros(len(x_sp)-len(x_np))])
-        else:
-            x_np = x_np[:len(x_sp)]
-        same = np.allclose(x_np, x_sp)
-        if not same:
-            print(f"Naive and poly implementations agree? {same}")
-            print(f"filter length: {filt_size}")
-            print(f"up: {up}")
-            print(f"x: {x}")
-            print(f"x_np: {x_np}")
-            print(f"x_sp: {x_sp}")
+@accept_reps
+def downsample_compare():
+    x = np.random.rand(100)
+    filt_len = np.random.randint(1,20)
+    down = np.random.randint(1,10)
+    filt = np.random.rand(filt_len)
+    x_sp = resample_poly(x, 1, down, window=filt)
+    x_np = np.convolve(x, filt)
+    start = get_start_index(filt_len)
+    if down == 1:
+        x_np = x
+    else:
+        x_np = x_np[start::down]
+    x_np = x_np[:len(x_sp)]
+    same = np.allclose(x_np, x_sp)
+    if not same:
+        print(f"Naive and poly implementations agree? {same}")
+        print(f"filter length: {filt_len}")
+        print(f"down: {down}")
+        print(f"x conv: {np.convolve(x, filt)[:15]}")
+        print(f"x_np: {x_np[:5]}")
+        print(f"x_sp: {x_sp[:5]}")
 
 
-def polyphase_compare(repetitions = 1):
-    for i in range(repetitions):
-        x_size = np.random.randint(10, 100)
-        filt_size = np.random.randint(1, x_size // 2)
-        up = np.random.randint(1, 30)
-        down = np.random.randint(1, 30)
-        ud_gcd = gcd(up, down)
-        up = up // ud_gcd
-        down = down // ud_gcd
-        x = np.random.rand(x_size)
-        filt = np.random.rand(filt_size)
-        x_np = np.zeros(up * x_size)
-        x_np[::up] = up * x
+@accept_reps
+def upsample_compare():
+    x_size = 100
+    filt_size = np.random.randint(1,30)
+    up = np.random.randint(1,10)
+    x = np.random.rand(x_size)
+    filt = np.random.rand(filt_size)
+    x_np = np.zeros(up * x_size)
+    x_np[::up] = up * x
+    if (up > 1):
         start = get_start_index(filt_size)
-        if (up == 1 and down == 1):
-            x_np = x
-        elif (up > 1 and down == 1):
-            # just up-sample
-            x_np = np.convolve(x_np, filt)
-            x_np = x_np[start:]
-        elif (up == 1 and down > 1):
-            # just down-sample
-            x_np = np.convolve(x_np, filt)
-            x_np = x_np[start::down]
-        else:
-            # non-trivial up and down
-            x_np = np.convolve(x_np, filt)
-            x_np = x_np[start::down]
-        x_sp = resample_poly(x, up, down, window=filt)
-        out_len = x_size * up
-        out_len = out_len // down + bool(out_len % down)
-        x_np = x_np[:out_len]
-        same = np.allclose(x_np, x_sp)
-        if not same:
-            print(f"Naive and poly implementations agree? {same}")
-            print(f"up: {up}, down: {down}, filt_size: {filt_size}")
-            print(f"x_np: {x_np}")
-            print(f"x_sp: {x_sp}")
+        x_np = np.convolve(x_np, filt)
+        x_np = x_np[start:]
+    x_sp = resample_poly(x, up, 1, window=filt)
+    if len(x_sp) > len(x_np):
+        x_np = np.concatenate([x_np,
+                              np.zeros(len(x_sp)-len(x_np))])
+    else:
+        x_np = x_np[:len(x_sp)]
+    same = np.allclose(x_np, x_sp)
+    if not same:
+        print(f"Naive and poly implementations agree? {same}")
+        print(f"filter length: {filt_size}")
+        print(f"up: {up}")
+        print(f"x: {x}")
+        print(f"x_np: {x_np}")
+        print(f"x_sp: {x_sp}")
+
+
+@accept_reps
+def polyphase_compare():
+    x_size = np.random.randint(10, 100)
+    filt_size = np.random.randint(1, x_size // 2)
+    up = np.random.randint(1, 30)
+    down = np.random.randint(1, 30)
+    ud_gcd = gcd(up, down)
+    up = up // ud_gcd
+    down = down // ud_gcd
+    x = np.random.rand(x_size)
+    filt = np.random.rand(filt_size)
+    x_np = np.zeros(up * x_size)
+    x_np[::up] = up * x
+    start = get_start_index(filt_size)
+    if (up == 1 and down == 1):
+        x_np = x
+    elif (up > 1 and down == 1):
+        # just up-sample
+        x_np = np.convolve(x_np, filt)
+        x_np = x_np[start:]
+    elif (up == 1 and down > 1):
+        # just down-sample
+        x_np = np.convolve(x_np, filt)
+        x_np = x_np[start::down]
+    else:
+        # non-trivial up and down
+        x_np = np.convolve(x_np, filt)
+        x_np = x_np[start::down]
+    x_sp = resample_poly(x, up, down, window=filt)
+    out_len = x_size * up
+    out_len = out_len // down + bool(out_len % down)
+    x_np = x_np[:out_len]
+    same = np.allclose(x_np, x_sp)
+    if not same:
+        print(f"Naive and poly implementations agree? {same}")
+        print(f"up: {up}, down: {down}, filt_size: {filt_size}")
+        print(f"x_np: {x_np}")
+        print(f"x_sp: {x_sp}")
 
 
 if __name__ == '__main__':
-    #downsample_compare(1000)
-    #upsample_compare(1000)
-    #polyphase_compare(1000)
-    #scipy_check_main(10)
-    gradcheck_main(10)
+    downsample_compare(1000)
+    upsample_compare(1000)
+    polyphase_compare(1000)
+    scipy_check_main(10)
+    gradcheck_main(100)
+    print("tests complete")

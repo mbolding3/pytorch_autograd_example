@@ -28,8 +28,8 @@ class MultipleArgs(Function):
         u_np = u_np.numpy()
         v_np = v_np.numpy()
         out = np.zeros(2)
-        out[0] = np.dot(u, v[:2])
-        out[1] = np.dot(u, v[2:])
+        out[0] = np.dot(u_np, v_np[:2])
+        out[1] = np.dot(u_np, v_np[2:])
         return torch.as_tensor(out, dtype=u.dtype)
 
     @staticmethod
