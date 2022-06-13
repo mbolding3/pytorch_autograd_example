@@ -12,7 +12,6 @@ from torch.nn.init import uniform_
 from torch.autograd.gradcheck import gradcheck
 from math import gcd
 from scipy.sparse import lil_matrix
-#from scipy.signal import resample_poly
 from cusignal import resample_poly
 from cusignal import choose_conv_method
 from cusignal import correlate
@@ -39,22 +38,24 @@ def best_corr(sig1, sig2, mode):
 class FuncCusignalResample(Function):
     @staticmethod
     def forward(ctx, x, filter_coeffs, up, down):
+        device        = x.device.type
         x             = x.detach()
         filter_coeffs = filter_coeffs.detach()
         up            = up.detach()
         down          = down.detach()
-        x_size_og = torch.Tensor([x.shape[0]])
-        f_og = torch.clone(filter_coeffs)
-        up_og = torch.clone(up)
-        down_og = torch.clone(down)
+        x_size_og     = torch.Tensor([x.shape[0]])
+        f_og          = torch.clone(filter_coeffs)
+        up_og         = torch.clone(up)
+        down_og       = torch.clone(down)
 
-        x_size = x.shape[0]
+        x_size    = x.shape[0]
         filt_size = filter_coeffs.shape[0]
-        up = int(up[0])
-        down = int(down[0])
-        ud_gcd = gcd(up, down)
-        up = up // ud_gcd
-        down = down // ud_gcd
+        # wrangling the up / down values
+        up        = int(up[0])
+        down      = int(down[0])
+        ud_gcd    = gcd(up, down)
+        up        = up // ud_gcd
+        down      = down // ud_gcd
 
         if (up == 1 and down == 1):
             x_out = x
@@ -62,16 +63,17 @@ class FuncCusignalResample(Function):
             out_len = torch.Tensor([0])
             x_up = None
         else:
-            x_up = torch.zeros(up * x_size, device = x.device.type,
-                               dtype = x.dtype)
+            x_up = torch.zeros(up * x_size, device = device, dtype = x.dtype)
             # This is probably terrible for device data.
             x_up[::up] = up * torch.clone(x)
-            window = filter_coeffs.numpy()
-            if x.device == 'cuda':
+            #window = filter_coeffs.numpy()
+            if 'cuda' in device:
                 gpupath = True
-                window = cp.array(window)
+                window = cp.array(filter_coeffs)
+                #window = cp.array(window)
             else:
                 gpupath = False
+                window = filter_coeffs.numpy()
             x_out = resample_poly(x, up, down, window = window,
                                   gpupath = gpupath)
             out_len = torch.Tensor([len(x_out)])
@@ -88,17 +90,18 @@ class FuncCusignalResample(Function):
         x_size, filter_coeffs, up, down, inverse_size, out_len, x_up \
         = ctx.saved_tensors
 
-        x_size = int(x_size[0])
+        device        = gradient.device.type
+        x_size        = int(x_size[0])
         gradient_size = gradient.shape[0]
-        filt_size = filter_coeffs.shape[0]
-        up = int(up[0])
-        down = int(down[0])
-        ud_gcd = gcd(up, down)
-        up = up // ud_gcd
-        down = down // ud_gcd
-        start = get_start_index(filt_size)
-        inverse_size = int(inverse_size)
-        out_x_len = int(out_len)
+        filt_size     = filter_coeffs.shape[0]
+        up            = int(up[0])
+        down          = int(down[0])
+        ud_gcd        = gcd(up, down)
+        up            = up // ud_gcd
+        down          = down // ud_gcd
+        start         = get_start_index(filt_size)
+        inverse_size  = int(inverse_size)
+        out_x_len     = int(out_len)
         filter_coeffs = filter_coeffs.type(gradient.dtype)
 
         if (up == 1 and down == 1):
@@ -106,7 +109,7 @@ class FuncCusignalResample(Function):
             out_x = gradient
             # J_f conv
             out_f = torch.zeros(filter_coeffs.shape[0],
-                                device = gradient.device.type,
+                                device = device,
                                 dtype = filter_coeffs.dtype)
         else:
             tmp = torch.zeros(out_x_len)
@@ -124,15 +127,6 @@ class FuncCusignalResample(Function):
             out_x = up * out_x[::up]
             out_f = best_corr(gradient_up, x_up, mode = 'valid')
 
-            '''
-            out_x = torch.conv1d(gradient_up.reshape(1, 1, inverse_size),
-                                 filter_coeffs.reshape(1, 1, filt_size))
-            out_x = up * out_x.reshape(out_x.shape[-1])[::up]
-            out_f = torch.conv1d(gradient_up.reshape(1, 1, inverse_size),
-                                 x_up.type(gradient.dtype).\
-                                 reshape(1, 1, x_up.shape[0]))
-            '''
-
         out_x = torch.Tensor(cp.asnumpy(out_x[:x_size]))
         out_f = torch.Tensor(cp.asnumpy(out_f[:filter_coeffs.shape[0]]))
 
@@ -147,8 +141,8 @@ class Resample(Module):
         self.filter_coeffs = filter_coeffs
 
     def forward(self, x):
-        #return FuncToyResample.apply(x, self.filter_coeffs, self.up, self.down)
-        return FuncCusignalResample.apply(x, self.filter_coeffs, self.up, self.down)
+        return FuncCusignalResample.apply(x, self.filter_coeffs, self.up,
+                                          self.down)
 
 
 def accept_reps(f):
@@ -189,23 +183,27 @@ def forward_main():
     gpupath = True accepts cupy typed windows.
     gpupath = False accepts numpy types windows.
     '''
-    gpupath = False
+    gpupath = True
+    if gpupath:
+        device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
     x_size = np.random.randint(30, 100)
     filter_size = np.random.randint(5, 20)
-    x = torch.randn(x_size)
-    up = torch.randint(1, 20, (1,))
-    down = torch.randint(1, 20, (1,))
-    window = torch.randn(filter_size)
+    x = torch.randn(x_size, device = device)
+    up = torch.randint(1, 20, (1,), device = device)
+    down = torch.randint(1, 20, (1,), device = device)
+    window = torch.randn(filter_size, device = device)
     # The module requires a torch tensor window
     module = Resample(up, down, window)
     # resample_poly requires a cupy or numpy array window
-    window = window.numpy()
+    window = window.cpu().numpy()
     if gpupath:
         window = cp.array(window)
-    scipy_resample = resample_poly(x, up, down, window = window,
+    bench_resample = resample_poly(x, up, down, window = window,
                                    gpupath = gpupath)
     our_resample = module.forward(x)
-    if not np.allclose(scipy_resample, our_resample, atol=1e-4):
+    if not np.allclose(bench_resample, our_resample, atol=1e-4):
         print(f"up: {up}, down: {down}")
         print(f"scipy result: {scipy_resample[:10]}")
         print(f"our result: {our_resample[:10]}")
